@@ -31,6 +31,19 @@ func startTURN(tcp net.Listener, udp net.PacketConn, secret string) (*turn.Serve
 		Realm:         turnRealm,
 		AuthHandler:   turn.NewLongTermAuthHandler(secret, lf.NewLogger("turn-auth")),
 		LoggerFactory: lf,
+		EventHandler: turn.EventHandler{
+			OnAuth: func(src, _ net.Addr, proto, _, _ string, method string, ok bool) {
+				if !ok {
+					log.Printf("TURN: 认证失败 %s/%s %s", proto, src, method)
+				}
+			},
+			OnAllocationCreated: func(src, _ net.Addr, proto, _, _ string, relay net.Addr, _ int) {
+				log.Printf("TURN: 已为 %s/%s 分配中继 %s", proto, src, relay)
+			},
+			OnAllocationError: func(src, _ net.Addr, proto, msg string) {
+				log.Printf("TURN: %s/%s 中继错误: %s", proto, src, msg)
+			},
+		},
 		ListenerConfigs: []turn.ListenerConfig{{
 			Listener:              tcp,
 			RelayAddressGenerator: gen,

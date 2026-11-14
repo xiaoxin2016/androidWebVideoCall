@@ -5,7 +5,9 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"os"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 	"unicode/utf8"
@@ -306,10 +308,49 @@ func (h *Hub) turnURLs(c *client) []string {
 	if err != nil {
 		host, port = c.host, "443"
 	}
-	if c.listener == roleWeb {
-		port = strconv.Itoa(h.callPort)
+	if c.listener != roleWeb {
+		return buildTurnURLs(host, port, h.udpEnabled)
 	}
-	return buildTurnURLs(host, port, h.udpEnabled)
+	// Web console: the browser runs on this machine. Chrome binds its TURN
+	// client sockets to a network interface address and cannot reliably
+	// reach a loopback TURN server from there (works on Linux, not on every
+	// OS), so point it at this machine's own interface address first and keep
+	// loopback only as a fallback.
+	port = strconv.Itoa(h.callPort)
+	if override := os.Getenv("VIDEOCALL_WEB_TURN_HOST"); override != "" {
+		return buildTurnURLs(override, port, h.udpEnabled)
+	}
+	if !isLoopbackHost(host) {
+		return buildTurnURLs(host, port, h.udpEnabled)
+	}
+	urls := []string{}
+	if ip := outboundIPv4(); ip != "" {
+		urls = buildTurnURLs(ip, port, h.udpEnabled)
+	}
+	return append(urls, buildTurnURLs("127.0.0.1", port, h.udpEnabled)...)
+}
+
+func isLoopbackHost(host string) bool {
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
+// outboundIPv4 returns the address of the interface holding the default
+// route (no packet is sent), else the first non-loopback IPv4 address.
+func outboundIPv4() string {
+	if c, err := net.Dial("udp4", "192.0.2.1:9"); err == nil {
+		defer c.Close()
+		if ua, ok := c.LocalAddr().(*net.UDPAddr); ok && !ua.IP.IsLoopback() && !ua.IP.IsUnspecified() {
+			return ua.IP.String()
+		}
+	}
+	if ips := localIPs(); len(ips) > 0 {
+		return ips[0]
+	}
+	return ""
 }
 
 func buildTurnURLs(host, port string, udp bool) []string {

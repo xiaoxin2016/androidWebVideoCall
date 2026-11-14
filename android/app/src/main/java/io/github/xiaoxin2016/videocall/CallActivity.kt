@@ -53,6 +53,7 @@ class CallActivity : AppCompatActivity(), SignalingClient.Listener, RtcSession.E
     private var camOn = true
     private var callStartedAt = 0L
     private var released = false
+    private var noRelay = false
     private val ui = Handler(Looper.getMainLooper())
 
     private val hostPort get() = "${SignalingClient.formatHost(host)}:$port"
@@ -147,6 +148,13 @@ class CallActivity : AppCompatActivity(), SignalingClient.Listener, RtcSession.E
             "accepted" -> {
                 setPhase(Phase.CONNECTING_MEDIA, getString(R.string.status_connecting_media))
                 rtc.startCall(iceServers ?: JSONArray())
+                // Give up instead of hanging in "connecting" forever.
+                ui.postDelayed({
+                    if (phase == Phase.CONNECTING_MEDIA) {
+                        send("hangup")
+                        end(getString(if (noRelay) R.string.err_no_relay else R.string.err_media_timeout, port))
+                    }
+                }, MEDIA_TIMEOUT_MS)
             }
             "answer" -> rtc.onRemoteAnswer(msg.optString("sdp"))
             "candidate" -> msg.optJSONObject("candidate")?.let { rtc.onRemoteCandidate(it) }
@@ -244,6 +252,11 @@ class CallActivity : AppCompatActivity(), SignalingClient.Listener, RtcSession.E
         if (released) return@runOnUiThread
         b.encPill.text = getString(R.string.e2e_encrypted_via, protocol.uppercase())
         send("netinfo") { put("relay", protocol) }
+    }
+
+    override fun onNoRelay() = runOnUiThread {
+        noRelay = true
+        if (phase == Phase.CONNECTING_MEDIA) b.callingStatus.text = getString(R.string.err_no_relay, port)
     }
 
     override fun onError(message: String) = runOnUiThread { showStatus(message) }
@@ -390,6 +403,7 @@ class CallActivity : AppCompatActivity(), SignalingClient.Listener, RtcSession.E
         private const val EXTRA_PORT = "port"
         private const val EXTRA_PASSWORD = "password"
         private const val EXTRA_NAME = "name"
+        private const val MEDIA_TIMEOUT_MS = 30_000L
 
         fun intent(ctx: Context, host: String, port: Int, password: String, name: String) =
             Intent(ctx, CallActivity::class.java)

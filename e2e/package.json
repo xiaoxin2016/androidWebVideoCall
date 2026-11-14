@@ -1,0 +1,11 @@
+{
+  "name": "videocall-e2e",
+  "private": true,
+  "description": "End-to-end call test: browser console vs. an Android-like client over TLS + TURN",
+  "scripts": {
+    "test": "node call.e2e.js"
+  },
+  "devDependencies": {
+    "playwright": "1.63.0"
+  }
+}

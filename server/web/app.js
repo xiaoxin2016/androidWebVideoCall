@@ -205,9 +205,36 @@ function createPeerConnection() {
   state.pc = pc;
   state.pendingCandidates = [];
 
+  state.relayCandidates = 0;
+  state.iceErrors = [];
   pc.onicecandidate = (e) => {
-    if (e.candidate) send({ type: 'candidate', candidate: e.candidate.toJSON() });
+    if (e.candidate) {
+      state.relayCandidates++;
+      send({ type: 'candidate', candidate: e.candidate.toJSON() });
+    }
   };
+  pc.onicecandidateerror = (e) => {
+    const msg = `${e.url || ''} ${e.errorCode || ''} ${e.errorText || ''}`.trim();
+    console.warn('ICE candidate error', msg);
+    state.iceErrors.push(msg);
+  };
+  pc.onicegatheringstatechange = () => {
+    if (pc.iceGatheringState === 'complete' && state.relayCandidates === 0) {
+      console.warn('no relay candidates', state.iceErrors);
+      toast('浏览器无法连接本机 TURN 中继：' + (state.iceErrors[0] || '未知原因') +
+        '。请检查本机防火墙是否放行通话端口。', 10000);
+    }
+  };
+  // Give up instead of hanging in "connecting" forever.
+  state.timers.push(setTimeout(() => {
+    if (state.pc === pc && pc.connectionState !== 'connected') {
+      console.warn('media timeout', pc.iceConnectionState, state.relayCandidates, state.iceErrors);
+      send({ type: 'hangup' });
+      endCall(state.relayCandidates === 0
+        ? '连接超时：浏览器未能连接本机 TURN 中继'
+        : '连接超时：媒体通道未建立，请检查通话端口（TCP/UDP）的转发与防火墙');
+    }
+  }, 30000));
   pc.ontrack = (e) => {
     const v = $('remoteVideo');
     if (!v.srcObject) v.srcObject = e.streams[0] || new MediaStream();
@@ -266,7 +293,7 @@ function endCall(msg) {
   $('incoming').classList.add('hidden');
   state.ringing = false;
   state.inCall = false;
-  state.timers.forEach(clearInterval);
+  state.timers.forEach((t) => { clearInterval(t); clearTimeout(t); });
   state.timers = [];
   state.callStart = 0;
   lastBytes = 0; lastTs = 0;

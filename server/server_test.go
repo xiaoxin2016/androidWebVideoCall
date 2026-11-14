@@ -2,6 +2,7 @@ package main
 
 import (
 	"net"
+	"strings"
 	"testing"
 	"time"
 
@@ -58,14 +59,34 @@ func TestTurnURLs(t *testing.T) {
 		{roleAndroid, "example.com:9443", []string{"turn:example.com:9443?transport=udp", "turn:example.com:9443?transport=tcp"}},
 		{roleAndroid, "[::1]:8443", []string{"turn:[::1]:8443?transport=udp", "turn:[::1]:8443?transport=tcp"}},
 		{roleAndroid, "example.com", []string{"turn:example.com:443?transport=udp", "turn:example.com:443?transport=tcp"}},
-		// web: console host, call port
-		{roleWeb, "localhost:8080", []string{"turn:localhost:8443?transport=udp", "turn:localhost:8443?transport=tcp"}},
+		// web opened via a non-loopback name: that host, call port
+		{roleWeb, "vc.example.com:8080", []string{"turn:vc.example.com:8443?transport=udp", "turn:vc.example.com:8443?transport=tcp"}},
 	}
 	for _, c := range cases {
 		got := h.turnURLs(&client{listener: c.listener, host: c.host})
 		if len(got) != len(c.want) || got[0] != c.want[0] || got[1] != c.want[1] {
 			t.Errorf("turnURLs(%s, %q) = %v, want %v", c.listener, c.host, got, c.want)
 		}
+	}
+}
+
+func TestWebTurnURLsAvoidLocalhost(t *testing.T) {
+	h := &Hub{udpEnabled: true, callPort: 8443}
+	got := h.turnURLs(&client{listener: roleWeb, host: "localhost:8080"})
+	if len(got) < 2 {
+		t.Fatalf("too few URLs: %v", got)
+	}
+	last := got[len(got)-1]
+	if last != "turn:127.0.0.1:8443?transport=tcp" {
+		t.Fatalf("loopback fallback missing: %v", got)
+	}
+	for _, u := range got {
+		if strings.Contains(u, "localhost") {
+			t.Fatalf("browser must not be pointed at a localhost TURN name: %v", got)
+		}
+	}
+	if ip := outboundIPv4(); ip != "" && !strings.Contains(got[0], ip) {
+		t.Fatalf("first URL should use the interface address %s: %v", ip, got)
 	}
 }
 

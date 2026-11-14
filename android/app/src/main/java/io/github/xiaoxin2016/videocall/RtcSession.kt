@@ -46,6 +46,9 @@ class RtcSession(
         fun onRemoteVideo(track: VideoTrack)
         fun onCameraSwitched(isFront: Boolean)
         fun onRelayProtocol(protocol: String)
+
+        /** ICE gathering finished without a single TURN relay candidate. */
+        fun onNoRelay()
         fun onError(message: String)
     }
 
@@ -63,6 +66,9 @@ class RtcSession(
     private var remoteDescriptionSet = false
     private var disposed = false
     private var capturePaused = false
+
+    @Volatile
+    private var localCandidates = 0
 
     var isFrontCamera = true
         private set
@@ -249,6 +255,7 @@ class RtcSession(
 
     private val pcObserver = object : PeerConnection.Observer {
         override fun onIceCandidate(c: IceCandidate) {
+            localCandidates++
             events.onLocalCandidate(JSONObject().apply {
                 put("candidate", c.sdp)
                 put("sdpMid", c.sdpMid)
@@ -269,7 +276,9 @@ class RtcSession(
         override fun onSignalingChange(s: PeerConnection.SignalingState) {}
         override fun onIceConnectionChange(s: PeerConnection.IceConnectionState) {}
         override fun onIceConnectionReceivingChange(b: Boolean) {}
-        override fun onIceGatheringChange(s: PeerConnection.IceGatheringState) {}
+        override fun onIceGatheringChange(s: PeerConnection.IceGatheringState) {
+            if (s == PeerConnection.IceGatheringState.COMPLETE && localCandidates == 0) events.onNoRelay()
+        }
         override fun onIceCandidatesRemoved(c: Array<out IceCandidate>) {}
         override fun onAddStream(s: MediaStream) {}
         override fun onRemoveStream(s: MediaStream) {}

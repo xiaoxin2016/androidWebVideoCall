@@ -1,0 +1,62 @@
+name: E2E
+
+on:
+  push:
+    branches: ["**"]
+    paths: ["server/**", "e2e/**", ".github/workflows/e2e.yml"]
+  pull_request:
+    paths: ["server/**", "e2e/**", ".github/workflows/e2e.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  call:
+    name: ${{ matrix.os }} · phone ${{ matrix.transport }}${{ matrix.web_turn_host && format(' · web TURN {0}', matrix.web_turn_host) || '' }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    # The "localhost" row reproduces the v0.1.0 behaviour for comparison only.
+    continue-on-error: ${{ matrix.web_turn_host == 'localhost' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        transport: [udp, tcp]
+        web_turn_host: [""]
+        include:
+          - { os: macos-latest, transport: udp, web_turn_host: localhost }
+          - { os: windows-latest, transport: udp, web_turn_host: localhost }
+          - { os: ubuntu-latest, transport: udp, web_turn_host: localhost }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: server/go.mod
+          cache-dependency-path: server/go.sum
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+      - name: Build server
+        shell: bash
+        run: |
+          cd server
+          ext=""; [ "$RUNNER_OS" = Windows ] && ext=".exe"
+          go build -o "$RUNNER_TEMP/videocall-server$ext" .
+          echo "SERVER_BIN=$RUNNER_TEMP/videocall-server$ext" >> "$GITHUB_ENV"
+      - name: Install Playwright Chromium
+        shell: bash
+        working-directory: e2e
+        run: |
+          npm ci
+          if [ "$RUNNER_OS" = Linux ]; then npx playwright install --with-deps chromium; else npx playwright install chromium; fi
+      - name: Run call test
+        working-directory: e2e
+        env:
+          ANDROID_TRANSPORT: ${{ matrix.transport }}
+          VIDEOCALL_WEB_TURN_HOST: ${{ matrix.web_turn_host }}
+        run: node call.e2e.js

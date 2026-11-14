@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">视频通话</string>
+    <string name="app_name">小新通话</string>
     <string name="subtitle">连接到你的服务端并发起呼叫</string>
     <string name="label_host">服务端地址</string>
     <string name="label_port">端口</string>
@@ -59,6 +59,8 @@
     <string name="err_busy">服务端正忙（已有通话进行中）</string>
     <string name="err_auth">认证失败：%1$s</string>
     <string name="err_connect">连接失败：%1$s</string>
+    <string name="err_no_relay">无法连接服务端的中继（TURN），请检查通话端口 %1$d 的 TCP/UDP 是否放行</string>
+    <string name="err_media_timeout">连接超时：媒体通道未建立，请检查通话端口 %1$d 的转发与防火墙</string>
     <string name="err_media_failed">媒体连接失败，请检查服务端通话端口的转发（TCP，及可选 UDP）</string>
 
     <string name="trust_first_title">核对服务端证书</string>
