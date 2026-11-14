@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">视频通话</string>
+    <string name="hint_host">服务端 IP 或域名</string>
+    <string name="hint_port">端口</string>
+    <string name="hint_password">密码（未设置可留空）</string>
+    <string name="hint_name">显示名称</string>
+    <string name="remember_password">记住密码（Android Keystore 加密保存）</string>
+    <string name="call">呼叫</string>
+    <string name="ok">确定</string>
+    <string name="cancel">取消</string>
+    <string name="clear_pins">清除已信任的服务端证书</string>
+    <string name="clear_pins_confirm">将清除 %1$d 个已信任证书，下次连接需重新核对指纹。</string>
+    <string name="pins_cleared">已清除</string>
+    <string name="security_note">信令使用 TLS 加密，首次连接需核对服务端显示的证书指纹；音视频使用 DTLS-SRTP 端到端加密。</string>
+    <string name="version_fmt">版本 %1$s</string>
+    <string name="err_host">请输入服务端地址</string>
+    <string name="err_port">端口无效</string>
+    <string name="err_permissions">需要摄像头和麦克风权限</string>
+
+    <string name="mute">静音</string>
+    <string name="unmute">取消静音</string>
+    <string name="switch_camera">翻转</string>
+    <string name="camera_off">关摄像头</string>
+    <string name="camera_on">开摄像头</string>
+    <string name="hangup">挂断</string>
+
+    <string name="status_connecting">正在连接 %1$s …</string>
+    <string name="status_waiting_peer">已连接服务端，Web 端未在线，等待上线…</string>
+    <string name="status_calling">正在呼叫，等待对方接听…</string>
+    <string name="status_connecting_media">对方已接听，正在建立媒体连接…</string>
+    <string name="status_reconnecting">网络不稳定，正在恢复…</string>
+    <string name="status_rejected">对方拒绝了通话</string>
+    <string name="status_peer_hangup">对方已挂断</string>
+    <string name="status_peer_lost">对方连接已断开</string>
+    <string name="status_server_lost">与服务端的连接已断开</string>
+    <string name="status_kicked">同一账号已在其他设备连接</string>
+    <string name="status_ended">通话已结束</string>
+    <string name="status_untrusted">未信任服务端证书，已取消连接</string>
+
+    <string name="err_bad_password">密码错误</string>
+    <string name="err_rate_limited">失败次数过多，请 %1$s 秒后再试</string>
+    <string name="err_busy">服务端正忙（已有通话进行中）</string>
+    <string name="err_auth">认证失败：%1$s</string>
+    <string name="err_connect">连接失败：%1$s</string>
+    <string name="err_media_failed">媒体连接失败，请检查服务端端口转发（TCP，及可选 UDP）</string>
+
+    <string name="trust_first_title">验证服务端证书</string>
+    <string name="trust_first_body">首次连接 %1$s。请确认下面的 SHA-256 指纹与服务端控制台或 Web 页面显示的一致：</string>
+    <string name="trust_accept">一致，信任并连接</string>
+    <string name="trust_changed_title">⚠ 服务端证书已变化</string>
+    <string name="trust_changed_body">%1$s 的证书与之前信任的不同。可能是服务端重新生成了证书，也可能是中间人攻击。除非你确认服务端证书已更换，否则请取消。</string>
+    <string name="trust_old">之前信任的指纹：</string>
+    <string name="trust_new">当前收到的指纹：</string>
+    <string name="trust_accept_changed">已确认更换，信任新证书</string>
+</resources>
