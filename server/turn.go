@@ -14,18 +14,19 @@ const turnRealm = "videocall"
 
 // startTURN runs the embedded TURN server.
 //
-// Every relay socket is bound to 127.0.0.1, so the two call parties' relayed
-// candidates meet on the server's loopback interface and no extra port has to
-// be exposed. To prevent the relay from being abused as a pivot into the
-// server host or its LAN (RFC 8656 §21), peers are restricted to loopback and
-// the relay sockets refuse to send to anything except another live relay
-// allocation of this server.
-func startTURN(tcp net.Listener, udp net.PacketConn, secret string) (*turn.Server, error) {
+// Every relay socket is bound to relayIP (this machine's own interface
+// address), so the two call parties' relayed candidates meet on this host and
+// no extra port has to be forwarded. Loopback is avoided on purpose: some
+// WebRTC stacks ignore loopback ICE candidates. To prevent the relay from
+// being abused as a pivot into the host or its LAN (RFC 8656 §21), peers are
+// restricted to relayIP and the relay sockets refuse to send to anything
+// except another live relay allocation of this server.
+func startTURN(tcp net.Listener, udp net.PacketConn, secret string, relayIP net.IP) (*turn.Server, error) {
 	lf := logging.NewDefaultLoggerFactory()
 	lf.DefaultLogLevel = logging.LogLevelWarn
 
-	gen := newGuardedRelayGen()
-	perm := func(_ net.Addr, peerIP net.IP) bool { return peerIP.IsLoopback() }
+	gen := newGuardedRelayGen(relayIP)
+	perm := func(_ net.Addr, peerIP net.IP) bool { return peerIP.Equal(relayIP) }
 
 	cfg := turn.ServerConfig{
 		Realm:         turnRealm,
@@ -61,14 +62,16 @@ func startTURN(tcp net.Listener, udp net.PacketConn, secret string) (*turn.Serve
 }
 
 type guardedRelayGen struct {
+	ip     net.IP
 	static *turn.RelayAddressGeneratorStatic
 	mu     sync.Mutex
 	ports  map[int]struct{}
 }
 
-func newGuardedRelayGen() *guardedRelayGen {
+func newGuardedRelayGen(ip net.IP) *guardedRelayGen {
 	return &guardedRelayGen{
-		static: &turn.RelayAddressGeneratorStatic{RelayAddress: net.IPv4(127, 0, 0, 1), Address: "127.0.0.1"},
+		ip:     ip,
+		static: &turn.RelayAddressGeneratorStatic{RelayAddress: ip, Address: ip.String()},
 		ports:  map[int]struct{}{},
 	}
 }
@@ -101,7 +104,7 @@ func (g *guardedRelayGen) AllocateConn(turn.AllocateConnConfig) (net.Conn, error
 
 func (g *guardedRelayGen) allowed(addr net.Addr) bool {
 	ua, ok := addr.(*net.UDPAddr)
-	if !ok || !ua.IP.IsLoopback() {
+	if !ok || !ua.IP.Equal(g.ip) {
 		return false
 	}
 	g.mu.Lock()
@@ -119,9 +122,9 @@ type guardedPacketConn struct {
 
 func (p *guardedPacketConn) WriteTo(b []byte, addr net.Addr) (int, error) {
 	if !p.gen.allowed(addr) {
-		// Stale loopback ports (the other side just hung up) are dropped
-		// silently; anything else is a relay abuse attempt worth logging.
-		if ua, ok := addr.(*net.UDPAddr); !ok || !ua.IP.IsLoopback() {
+		// Stale ports on our own address (the other side just hung up) are
+		// dropped silently; anything else is a relay abuse attempt.
+		if ua, ok := addr.(*net.UDPAddr); !ok || !ua.IP.Equal(p.gen.ip) {
 			log.Printf("TURN: 已拦截发往非本服务中继地址的数据 %v", addr)
 		}
 		return len(b), nil

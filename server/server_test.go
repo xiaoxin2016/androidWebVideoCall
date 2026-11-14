@@ -152,7 +152,7 @@ func TestAuthLimiter(t *testing.T) {
 }
 
 func TestGuardedRelay(t *testing.T) {
-	g := newGuardedRelayGen()
+	g := newGuardedRelayGen(net.IPv4(127, 0, 0, 1))
 	if err := g.Validate(); err != nil {
 		t.Fatal(err)
 	}

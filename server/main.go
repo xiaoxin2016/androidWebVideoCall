@@ -143,8 +143,12 @@ func main() {
 	}
 	turnSecret := hex.EncodeToString(secret)
 
+	relayIP := net.IPv4(127, 0, 0, 1)
+	if ip := net.ParseIP(outboundIPv4()); ip != nil {
+		relayIP = ip
+	}
 	mux := newDemux(callLn)
-	turnSrv, err := startTURN(mux.turn, udpConn, turnSecret)
+	turnSrv, err := startTURN(mux.turn, udpConn, turnSecret, relayIP)
 	if err != nil {
 		log.Fatalf("TURN: %v", err)
 	}
@@ -190,6 +194,7 @@ func main() {
 
 	consoleURL := fmt.Sprintf("http://%s/", consoleHostPort(cfg.ConsoleListen, consolePort))
 	printBanner(info, consoleURL, hub.passwordSet())
+	log.Printf("TURN 中继地址: %s（本机网卡地址，无需额外开放端口）", relayIP)
 
 	if cfg.OpenBrowser == nil || *cfg.OpenBrowser {
 		go openBrowser(consoleURL)
