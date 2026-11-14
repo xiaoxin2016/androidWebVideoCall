@@ -28,7 +28,6 @@ func TestDemuxClassify(t *testing.T) {
 		{0x16, d.tls},
 		{0x00, d.turn},
 		{0x01, d.turn},
-		{'G', d.http},
 	}
 	for _, c := range cases {
 		conn, err := net.Dial("tcp", ln.Addr().String())
@@ -51,17 +50,65 @@ func TestDemuxClassify(t *testing.T) {
 }
 
 func TestTurnURLs(t *testing.T) {
-	h := &Hub{udpEnabled: true}
-	cases := map[string][]string{
-		"example.com:9443": {"turn:example.com:9443?transport=udp", "turn:example.com:9443?transport=tcp"},
-		"[::1]:8443":       {"turn:[::1]:8443?transport=udp", "turn:[::1]:8443?transport=tcp"},
-		"example.com":      {"turn:example.com:443?transport=udp", "turn:example.com:443?transport=tcp"},
+	h := &Hub{udpEnabled: true, callPort: 8443}
+	cases := []struct {
+		listener, host string
+		want           []string
+	}{
+		{roleAndroid, "example.com:9443", []string{"turn:example.com:9443?transport=udp", "turn:example.com:9443?transport=tcp"}},
+		{roleAndroid, "[::1]:8443", []string{"turn:[::1]:8443?transport=udp", "turn:[::1]:8443?transport=tcp"}},
+		{roleAndroid, "example.com", []string{"turn:example.com:443?transport=udp", "turn:example.com:443?transport=tcp"}},
+		// web: console host, call port
+		{roleWeb, "localhost:8080", []string{"turn:localhost:8443?transport=udp", "turn:localhost:8443?transport=tcp"}},
 	}
-	for in, want := range cases {
-		got := h.turnURLs(in)
-		if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
-			t.Errorf("turnURLs(%q) = %v, want %v", in, got, want)
+	for _, c := range cases {
+		got := h.turnURLs(&client{listener: c.listener, host: c.host})
+		if len(got) != len(c.want) || got[0] != c.want[0] || got[1] != c.want[1] {
+			t.Errorf("turnURLs(%s, %q) = %v, want %v", c.listener, c.host, got, c.want)
 		}
+	}
+}
+
+func TestPasswordHash(t *testing.T) {
+	h, err := hashPassword("correct horse")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !verifyPassword(h, "correct horse") {
+		t.Fatal("correct password rejected")
+	}
+	if verifyPassword(h, "correct horsE") || verifyPassword(h, "") {
+		t.Fatal("wrong password accepted")
+	}
+	h2, _ := hashPassword("correct horse")
+	if h == h2 {
+		t.Fatal("hash is not salted")
+	}
+	for _, bad := range []string{"", "plain", "$argon2id$v=19$m=999999999,t=1,p=1$AAAA$AAAA"} {
+		if verifyPassword(bad, "x") {
+			t.Fatalf("malformed hash %q accepted", bad)
+		}
+	}
+	if validatePassword("short") == nil {
+		t.Fatal("short password accepted")
+	}
+}
+
+func TestConfigPersistsOnlyHash(t *testing.T) {
+	dir := t.TempDir()
+	s, created, err := loadOrCreateConfig(dir + "/config.json")
+	if err != nil || !created {
+		t.Fatalf("create: %v %v", created, err)
+	}
+	if err := s.setPasswordHash("$argon2id$test"); err != nil {
+		t.Fatal(err)
+	}
+	s2, created, err := loadOrCreateConfig(dir + "/config.json")
+	if err != nil || created {
+		t.Fatalf("reload: %v %v", created, err)
+	}
+	if s2.cfg.PasswordHash != "$argon2id$test" || s2.cfg.ConsoleListen != defaultConsoleListen {
+		t.Fatalf("unexpected config %+v", s2.cfg)
 	}
 }
 

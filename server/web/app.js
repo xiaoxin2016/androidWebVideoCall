@@ -4,9 +4,10 @@ const $ = (id) => document.getElementById(id);
 
 const state = {
   ws: null,
-  password: '',
-  passwordRequired: false,
+  info: null,
   iceServers: [],
+  passwordSet: false,
+  editingPassword: false,
   pc: null,
   localStream: null,
   pendingCandidates: [],
@@ -17,13 +18,8 @@ const state = {
   reconnectTimer: null,
   stopReconnect: false,
   ring: null,
-};
-
-const REASONS = {
-  bad_password: '密码错误',
-  rate_limited: '尝试次数过多，请稍后再试',
-  busy: '已有另一个 Web 端正在通话中',
-  bad_role: '协议错误',
+  peerRelay: '',
+  peerName: '',
 };
 
 // ---------- signaling ----------
@@ -33,10 +29,7 @@ function connect() {
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
   const ws = new WebSocket(`${proto}//${location.host}/ws`);
   state.ws = ws;
-
-  ws.onopen = () => {
-    ws.send(JSON.stringify({ type: 'auth', role: 'web', name: '服务端', password: state.password }));
-  };
+  ws.onopen = () => ws.send(JSON.stringify({ type: 'auth', role: 'web', name: '服务端' }));
   ws.onmessage = (ev) => {
     let m;
     try { m = JSON.parse(ev.data); } catch { return; }
@@ -44,10 +37,10 @@ function connect() {
   };
   ws.onclose = () => {
     if (state.ws !== ws) return;
-    setPill('sigStatus', false, '信令未连接');
-    setPill('peerStatus', false, 'Android 离线');
+    setService(false, '服务未连接');
+    setPeer(false);
     if (state.inCall || state.ringing) endCall('与服务端的连接已断开');
-    if (!state.stopReconnect) state.reconnectTimer = setTimeout(connect, 3000);
+    if (!state.stopReconnect) state.reconnectTimer = setTimeout(connect, 2000);
   };
 }
 
@@ -59,29 +52,34 @@ async function onSignal(m) {
   switch (m.type) {
     case 'auth_ok':
       state.iceServers = m.iceServers || [];
-      setPill('sigStatus', true, '信令已连接');
+      setService(true, '服务运行中');
       setPeer(m.peerOnline, m.peerName);
-      $('login').classList.add('hidden');
-      $('stage').classList.remove('hidden');
-      $('fingerprint').textContent = m.fingerprint;
+      setPasswordState(!!m.passwordSet);
       break;
     case 'auth_fail':
-      state.stopReconnect = m.reason === 'bad_password';
-      showLogin(REASONS[m.reason] || m.reason);
-      if (m.reason === 'rate_limited' || m.reason === 'busy') {
-        state.stopReconnect = true;
-      }
+      state.stopReconnect = true;
+      setService(false, m.reason === 'busy' ? '另一个控制台正在通话' : '连接被拒绝');
       break;
     case 'kicked':
       state.stopReconnect = true;
       endCall();
-      setMsg('已在其他页面登录，本页面已断开。刷新页面可重新连接。');
+      setService(false, '已在其他页面打开');
+      toast('控制台已在其他页面打开，本页已断开。刷新可重新连接。', 6000);
       break;
     case 'presence':
       setPeer(m.online, m.name);
       break;
+    case 'password_status':
+      if (m.error) {
+        showPwError(m.error);
+      } else {
+        setPasswordState(!!m.set);
+        if (m.changed) toast(m.set ? '接入密码已更新' : '接入密码已清除');
+      }
+      $('btnPwSave').disabled = false;
+      break;
     case 'incoming':
-      onIncoming(m.name);
+      onIncoming(m);
       break;
     case 'offer':
       await onOffer(m.sdp);
@@ -89,20 +87,83 @@ async function onSignal(m) {
     case 'candidate':
       await onRemoteCandidate(m.candidate);
       break;
+    case 'netinfo':
+      state.peerRelay = m.relay || '';
+      break;
     case 'hangup':
       endCall(m.reason === 'disconnected' ? '对方连接已断开' : '对方已挂断');
       break;
   }
 }
 
+// ---------- password card ----------
+
+function setPasswordState(set) {
+  state.passwordSet = set;
+  state.editingPassword = false;
+  const badge = $('pwBadge');
+  badge.textContent = set ? '已设置' : '未设置';
+  badge.className = 'badge ' + (set ? 'ok' : 'warn');
+  $('pwCard').classList.toggle('warn', !set);
+  $('pwAlert').classList.toggle('hidden', set);
+  $('pwView').classList.toggle('hidden', !set);
+  $('pwForm').classList.toggle('hidden', set);
+  $('btnPwCancel').classList.toggle('hidden', true);
+  $('pwForm').reset();
+  resetPwHint();
+  $('idleHint').textContent = set
+    ? '保持此页面打开。来电时会响铃并弹出接听提示，接听后才会开启摄像头和麦克风。'
+    : '建议先在右侧设置接入密码，再把密码告诉需要呼叫你的人。';
+}
+
+function resetPwHint() {
+  const h = $('pwHint');
+  h.textContent = '至少 8 位。服务端只保存密码的加盐哈希（argon2id）。';
+  h.classList.remove('error');
+}
+
+function showPwError(msg) {
+  const h = $('pwHint');
+  h.textContent = msg;
+  h.classList.add('error');
+  $('btnPwSave').disabled = false;
+}
+
+function savePassword(e) {
+  e.preventDefault();
+  const pw = $('pwNew').value;
+  if ([...pw].length < 8) return showPwError('密码至少 8 位');
+  if (pw !== $('pwConfirm').value) return showPwError('两次输入的密码不一致');
+  $('btnPwSave').disabled = true;
+  send({ type: 'set_password', password: pw });
+}
+
+function editPassword() {
+  state.editingPassword = true;
+  $('pwView').classList.add('hidden');
+  $('pwForm').classList.remove('hidden');
+  $('btnPwCancel').classList.remove('hidden');
+  resetPwHint();
+  $('pwNew').focus();
+}
+
+function clearPassword() {
+  if (!confirm('清除后任何能访问通话端口的人都可以向你发起呼叫，确定清除？')) return;
+  send({ type: 'clear_password' });
+}
+
 // ---------- call flow ----------
 
-function onIncoming(name) {
+function onIncoming(m) {
   state.ringing = true;
-  $('incomingName').textContent = name || 'Android';
+  state.peerName = m.name || 'Android';
+  $('inName').textContent = state.peerName;
+  $('inAvatar').textContent = initials(state.peerName);
+  $('inMeta').textContent = `来自 ${m.ip || '未知地址'} · ${m.verified ? '已通过密码验证' : '未设置接入密码'}`;
   $('incoming').classList.remove('hidden');
+  $('btnAccept').focus();
   startRing();
-  notify(`${name || 'Android'} 正在呼叫你`);
+  notify(`${state.peerName} 正在呼叫你`);
 }
 
 async function accept() {
@@ -112,18 +173,20 @@ async function accept() {
   try {
     await startLocalMedia();
   } catch (e) {
-    setMsg('无法打开摄像头/麦克风: ' + e.message);
+    toast('无法打开摄像头/麦克风：' + e.message, 6000);
     send({ type: 'reject' });
     return;
   }
   state.inCall = true;
+  state.peerRelay = '';
   createPeerConnection();
   send({ type: 'accept' });
-  $('idleOverlay').classList.add('hidden');
-  $('controls').classList.remove('hidden');
-  $('callInfo').classList.remove('hidden');
-  $('callPeer').textContent = $('incomingName').textContent;
-  setMsg('正在建立连接…');
+  $('callPeer').textContent = state.peerName;
+  $('callAvatar').textContent = initials(state.peerName);
+  $('callTimer').textContent = '00:00';
+  $('netInfo').textContent = '正在建立连接…';
+  $('devPopover').appendChild($('devBody'));
+  document.body.classList.add('incall');
 }
 
 function reject() {
@@ -136,8 +199,7 @@ function reject() {
 function createPeerConnection() {
   const pc = new RTCPeerConnection({
     iceServers: state.iceServers,
-    // Everything goes through the embedded TURN relay on this server.
-    iceTransportPolicy: 'relay',
+    iceTransportPolicy: 'relay', // all media through the embedded TURN relay
     bundlePolicy: 'max-bundle',
   });
   state.pc = pc;
@@ -150,23 +212,24 @@ function createPeerConnection() {
     const v = $('remoteVideo');
     if (!v.srcObject) v.srcObject = e.streams[0] || new MediaStream();
     if (!e.streams[0]) v.srcObject.addTrack(e.track);
+    v.classList.remove('hidden');
   };
   pc.onconnectionstatechange = () => {
     switch (pc.connectionState) {
       case 'connected':
-        setMsg('');
         if (!state.callStart) {
           state.callStart = Date.now();
           state.timers.push(setInterval(updateTimer, 1000));
           state.timers.push(setInterval(updateStats, 2000));
+          updateStats();
         }
         break;
       case 'disconnected':
-        setMsg('网络中断，正在尝试恢复…');
+        $('netInfo').textContent = '网络中断，正在恢复…';
         break;
       case 'failed':
         send({ type: 'hangup' });
-        endCall('媒体连接失败（请检查端口转发与防火墙）');
+        endCall('媒体连接失败，请检查通话端口的转发与防火墙');
         break;
     }
   };
@@ -206,6 +269,7 @@ function endCall(msg) {
   state.timers.forEach(clearInterval);
   state.timers = [];
   state.callStart = 0;
+  lastBytes = 0; lastTs = 0;
   if (state.pc) {
     state.pc.ontrack = state.pc.onicecandidate = state.pc.onconnectionstatechange = null;
     state.pc.close();
@@ -215,17 +279,17 @@ function endCall(msg) {
     state.localStream.getTracks().forEach((t) => t.stop());
     state.localStream = null;
   }
-  $('remoteVideo').srcObject = null;
-  const lv = $('localVideo');
-  lv.srcObject = null;
-  lv.removeAttribute('data-active');
-  $('idleOverlay').classList.remove('hidden');
-  $('controls').classList.add('hidden');
-  $('callInfo').classList.add('hidden');
-  $('netInfo').textContent = '';
-  $('btnMute').textContent = '静音';
-  $('btnCam').textContent = '关闭摄像头';
-  if (msg) setMsg(msg);
+  const rv = $('remoteVideo');
+  rv.srcObject = null;
+  rv.classList.add('hidden');
+  $('localVideo').srcObject = null;
+  document.body.classList.remove('incall');
+  $('devCard').appendChild($('devBody'));
+  $('devPopover').classList.add('hidden');
+  $('btnDevices').setAttribute('aria-expanded', 'false');
+  setPressed($('btnMute'), false, '静音', '取消静音');
+  setPressed($('btnCam'), false, '关闭摄像头', '打开摄像头');
+  if (msg) toast(msg);
 }
 
 // ---------- media ----------
@@ -243,9 +307,7 @@ async function startLocalMedia() {
       echoCancellation: true, noiseSuppression: true, autoGainControl: true,
     },
   });
-  const lv = $('localVideo');
-  lv.srcObject = state.localStream;
-  lv.setAttribute('data-active', '');
+  $('localVideo').srcObject = state.localStream;
   await refreshDevices();
 }
 
@@ -259,12 +321,20 @@ async function refreshDevices() {
 }
 
 function fillSelect(sel, list, label, current) {
+  const prev = current || sel.value;
   sel.innerHTML = '';
+  if (!list.length) {
+    const o = document.createElement('option');
+    o.textContent = `未检测到${label}`;
+    o.value = '';
+    sel.appendChild(o);
+    return;
+  }
   list.forEach((d, i) => {
     const o = document.createElement('option');
     o.value = d.deviceId;
     o.textContent = d.label || `${label} ${i + 1}`;
-    if (d.deviceId === current) o.selected = true;
+    if (d.deviceId === prev) o.selected = true;
     sel.appendChild(o);
   });
 }
@@ -272,6 +342,7 @@ function fillSelect(sel, list, label, current) {
 async function switchDevice(kind) {
   if (!state.localStream) return;
   const id = kind === 'video' ? $('camSelect').value : $('micSelect').value;
+  if (!id) return;
   const constraints = kind === 'video'
     ? { video: { deviceId: { exact: id }, width: { ideal: 1280 }, height: { ideal: 720 } } }
     : { audio: { deviceId: { exact: id }, echoCancellation: true, noiseSuppression: true } };
@@ -285,62 +356,80 @@ async function switchDevice(kind) {
     if (old) { state.localStream.removeTrack(old); old.stop(); }
     state.localStream.addTrack(newTrack);
   } catch (e) {
-    setMsg('切换设备失败: ' + e.message);
+    toast('切换设备失败：' + e.message);
   }
 }
 
-function toggleTrack(kind, btn, onText, offText) {
+function toggleTrack(kind, btn, onLabel, offLabel) {
   if (!state.localStream) return;
   const tracks = kind === 'audio' ? state.localStream.getAudioTracks() : state.localStream.getVideoTracks();
-  const enabled = !tracks.every((t) => !t.enabled);
-  tracks.forEach((t) => { t.enabled = !enabled; });
-  btn.textContent = enabled ? offText : onText;
+  const disabledNow = tracks.every((t) => !t.enabled);
+  tracks.forEach((t) => { t.enabled = disabledNow; });
+  setPressed(btn, !disabledNow, onLabel, offLabel);
+}
+
+function setPressed(btn, pressed, onLabel, offLabel) {
+  btn.setAttribute('aria-pressed', String(pressed));
+  const label = pressed ? offLabel : onLabel;
+  btn.setAttribute('aria-label', label);
+  btn.title = label;
 }
 
 // ---------- UI helpers ----------
 
-function setPill(id, on, text) {
-  const el = $(id);
-  el.textContent = text;
-  el.classList.toggle('on', on);
-  el.classList.toggle('off', !on);
+function initials(name) {
+  const s = (name || '').trim();
+  if (!s) return 'A';
+  const words = s.split(/\s+/);
+  if (/^[\x00-\x7F]/.test(s)) {
+    return words.length > 1 ? (words[0][0] + words[1][0]).toUpperCase() : s.slice(0, 2).toUpperCase();
+  }
+  return [...s][0];
+}
+
+function setService(on, text) {
+  $('svcText').textContent = text;
+  $('svcChip').querySelector('.dot').classList.toggle('off', !on);
 }
 
 function setPeer(online, name) {
-  setPill('peerStatus', !!online, online ? `Android 在线${name ? '：' + name : ''}` : 'Android 离线');
+  $('peerPill').classList.toggle('on', !!online);
+  $('peerText').textContent = online ? `Android 在线${name ? ' · ' + name : ''}` : 'Android 未连接';
 }
 
-function setMsg(t) { $('stageMsg').textContent = t || ''; }
-
-function showLogin(err) {
-  $('stage').classList.add('hidden');
-  $('login').classList.remove('hidden');
-  $('loginError').textContent = err || '';
-  $('password').focus();
+let toastTimer;
+function toast(text, ms = 3500) {
+  const t = $('toast');
+  t.textContent = text;
+  t.classList.remove('hidden');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.add('hidden'), ms);
 }
 
 function updateTimer() {
   const s = Math.floor((Date.now() - state.callStart) / 1000);
-  $('callTimer').textContent =
-    `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
+  const h = Math.floor(s / 3600);
+  const mm = String(Math.floor((s % 3600) / 60)).padStart(2, '0');
+  const ss = String(s % 60).padStart(2, '0');
+  $('callTimer').textContent = h ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
 }
 
 let lastBytes = 0, lastTs = 0;
 async function updateStats() {
   if (!state.pc) return;
   const stats = await state.pc.getStats();
-  let pair, local, inboundBytes = 0;
+  let pair, inboundBytes = 0;
   stats.forEach((r) => {
     if (r.type === 'transport' && r.selectedCandidatePairId) pair = stats.get(r.selectedCandidatePairId);
     if (r.type === 'inbound-rtp' && r.kind === 'video') inboundBytes = r.bytesReceived;
   });
-  if (pair) local = stats.get(pair.localCandidateId);
   const parts = [];
-  if (local) parts.push(`中继 ${(local.relayProtocol || local.protocol || '').toUpperCase()}`);
-  if (pair && pair.currentRoundTripTime !== undefined) parts.push(`RTT ${Math.round(pair.currentRoundTripTime * 1000)}ms`);
+  parts.push(state.peerRelay ? `${state.peerRelay.toUpperCase()} 中继` : '中继');
+  if (pair && pair.currentRoundTripTime !== undefined) parts.push(`${Math.round(pair.currentRoundTripTime * 1000)} ms`);
   const now = Date.now();
   if (lastTs && inboundBytes >= lastBytes) {
-    parts.push(`${Math.round(((inboundBytes - lastBytes) * 8) / (now - lastTs))} kbps`);
+    const kbps = ((inboundBytes - lastBytes) * 8) / (now - lastTs);
+    parts.push(kbps >= 1000 ? `${(kbps / 1000).toFixed(1)} Mbps` : `${Math.round(kbps)} kbps`);
   }
   lastBytes = inboundBytes; lastTs = now;
   $('netInfo').textContent = parts.join(' · ');
@@ -363,7 +452,7 @@ function startRing() {
     };
     beep();
     state.ring = { ctx, timer: setInterval(beep, 2000) };
-  } catch { /* autoplay policy may block sound; the modal is still shown */ }
+  } catch { /* autoplay policy may block sound; the dialog is still shown */ }
 }
 
 function stopRing() {
@@ -378,43 +467,60 @@ function notify(text) {
   if (Notification.permission === 'granted') new Notification('视频通话', { body: text });
 }
 
+function formatFingerprint(fp) {
+  const parts = (fp || '').split(':');
+  const lines = [];
+  for (let i = 0; i < parts.length; i += 8) lines.push(parts.slice(i, i + 8).join(':'));
+  return lines.join('\n');
+}
+
 // ---------- init ----------
 
 async function init() {
-  $('loginForm').addEventListener('submit', (e) => {
-    e.preventDefault();
-    state.password = $('password').value;
-    state.stopReconnect = false;
-    $('loginError').textContent = '';
-    if (state.ws) { state.ws.onclose = null; state.ws.close(); }
-    connect();
-  });
   $('btnAccept').onclick = accept;
   $('btnReject').onclick = reject;
   $('btnHangup').onclick = hangup;
   $('btnMute').onclick = () => toggleTrack('audio', $('btnMute'), '静音', '取消静音');
   $('btnCam').onclick = () => toggleTrack('video', $('btnCam'), '关闭摄像头', '打开摄像头');
+  $('btnDevices').onclick = () => {
+    const pop = $('devPopover');
+    const open = pop.classList.toggle('hidden') === false;
+    $('btnDevices').setAttribute('aria-expanded', String(open));
+  };
   $('camSelect').onchange = () => switchDevice('video');
   $('micSelect').onchange = () => switchDevice('audio');
+  $('pwForm').addEventListener('submit', savePassword);
+  $('btnPwEdit').onclick = editPassword;
+  $('btnPwCancel').onclick = () => setPasswordState(state.passwordSet);
+  $('btnPwClear').onclick = clearPassword;
+  $('btnCopyFp').onclick = async () => {
+    try {
+      await navigator.clipboard.writeText(state.info.fingerprint);
+      $('btnCopyFp').querySelector('span').textContent = '已复制';
+      setTimeout(() => { $('btnCopyFp').querySelector('span').textContent = '复制'; }, 1500);
+    } catch {
+      toast('复制失败，请手动选择指纹');
+    }
+  };
 
   if ('Notification' in window && Notification.permission === 'default') {
     document.addEventListener('click', () => Notification.requestPermission(), { once: true });
   }
-
   if (!window.isSecureContext || !navigator.mediaDevices) {
-    setMsg('当前页面不是安全上下文，无法使用摄像头。请通过 http://localhost 或 https:// 访问。');
+    toast('当前页面不是安全上下文，无法使用摄像头。请用 http://localhost 打开控制台。', 10000);
   }
 
+  $('consoleAddr').textContent = location.host;
   const info = await fetch('api/info').then((r) => r.json());
+  state.info = info;
   $('version').textContent = info.version;
-  $('fingerprint').textContent = info.fingerprint;
-  state.passwordRequired = info.passwordRequired;
-  if (info.passwordRequired) {
-    showLogin();
-  } else {
-    $('stage').classList.remove('hidden');
-    connect();
-  }
+  $('fingerprint').textContent = formatFingerprint(info.fingerprint);
+  $('infoCall').textContent = `${info.udp ? 'TCP + UDP' : '仅 TCP'} ${info.callPort}`;
+  $('alertPort').textContent = String(info.callPort);
+  $('infoConsole').textContent = String(info.consolePort);
+  $('infoIPs').textContent = (info.localIPs || []).join('\n') || '—';
+
+  connect();
   refreshDevices().catch(() => {});
 }
 

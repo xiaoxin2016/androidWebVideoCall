@@ -2,21 +2,29 @@ package io.github.xiaoxin2016.videocall
 
 import android.content.Context
 import android.content.Intent
+import android.content.res.ColorStateList
 import android.graphics.Typeface
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
+import android.view.Gravity
 import android.view.View
 import android.view.WindowManager
+import android.widget.FrameLayout
+import android.widget.GridLayout
+import android.widget.ImageButton
 import android.widget.TextView
 import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
-import com.google.android.material.dialog.MaterialAlertDialogBuilder
+import com.google.android.material.bottomsheet.BottomSheetBehavior
+import com.google.android.material.bottomsheet.BottomSheetDialog
 import io.github.xiaoxin2016.videocall.databinding.ActivityCallBinding
+import io.github.xiaoxin2016.videocall.databinding.SheetTrustBinding
 import org.json.JSONArray
 import org.json.JSONObject
 import org.webrtc.PeerConnection
@@ -54,6 +62,7 @@ class CallActivity : AppCompatActivity(), SignalingClient.Listener, RtcSession.E
         b = ActivityCallBinding.inflate(layoutInflater)
         setContentView(b.root)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        WindowCompat.setDecorFitsSystemWindows(window, false)
         WindowCompat.getInsetsController(window, window.decorView).apply {
             hide(WindowInsetsCompat.Type.systemBars())
             systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
@@ -64,6 +73,7 @@ class CallActivity : AppCompatActivity(), SignalingClient.Listener, RtcSession.E
         password = intent.getStringExtra(EXTRA_PASSWORD).orEmpty()
         name = intent.getStringExtra(EXTRA_NAME).orEmpty()
         pins = PinStore(this)
+        b.callingHost.text = hostPort
 
         rtc = RtcSession(this, this)
         b.remoteView.init(rtc.eglBase.eglBaseContext, null)
@@ -80,17 +90,12 @@ class CallActivity : AppCompatActivity(), SignalingClient.Listener, RtcSession.E
         rtc.init(b.localView)
 
         b.btnHangup.setOnClickListener { hangup() }
+        b.btnCancel.setOnClickListener { hangup() }
         b.btnSwitch.setOnClickListener { rtc.switchCamera() }
-        b.btnMute.setOnClickListener {
-            micOn = !micOn
-            rtc.setMicEnabled(micOn)
-            b.btnMute.text = getString(if (micOn) R.string.mute else R.string.unmute)
-        }
-        b.btnCamera.setOnClickListener {
-            camOn = !camOn
-            rtc.setCameraEnabled(camOn)
-            b.btnCamera.text = getString(if (camOn) R.string.camera_off else R.string.camera_on)
-        }
+        b.btnFlipCalling.setOnClickListener { rtc.switchCamera() }
+        b.btnMute.setOnClickListener { toggleMic() }
+        b.btnMuteCalling.setOnClickListener { toggleMic() }
+        b.btnCamera.setOnClickListener { toggleCamera() }
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() = hangup()
         })
@@ -102,7 +107,7 @@ class CallActivity : AppCompatActivity(), SignalingClient.Listener, RtcSession.E
 
     private fun connectSignaling() {
         signaling?.close()
-        setPhase(Phase.CONNECTING, getString(R.string.status_connecting, hostPort))
+        setPhase(Phase.CONNECTING, getString(R.string.status_connecting))
         signaling = SignalingClient(host, port, pins.get(hostPort), this).also { it.connect() }
     }
 
@@ -178,36 +183,22 @@ class CallActivity : AppCompatActivity(), SignalingClient.Listener, RtcSession.E
 
     private fun askTrust(fingerprint: String, previouslyPinned: String?) {
         if (isFinishing) return
-        val msg = StringBuilder()
-        if (previouslyPinned == null) {
-            msg.append(getString(R.string.trust_first_body, hostPort))
-        } else {
-            msg.append(getString(R.string.trust_changed_body, hostPort))
-            msg.append("\n\n").append(getString(R.string.trust_old)).append('\n')
-                .append(formatFingerprint(previouslyPinned))
-            msg.append("\n\n").append(getString(R.string.trust_new))
+        val sheet = BottomSheetDialog(this)
+        val sb = SheetTrustBinding.inflate(layoutInflater)
+        bindTrustSheet(this, sb, hostPort, fingerprint, previouslyPinned)
+        var decided = false
+        sb.trustAccept.setOnClickListener {
+            decided = true
+            pins.put(hostPort, fingerprint)
+            sheet.dismiss()
+            connectSignaling()
         }
-        msg.append('\n').append(formatFingerprint(fingerprint))
-
-        val tv = TextView(this).apply {
-            text = msg
-            typeface = Typeface.MONOSPACE
-            setTextIsSelectable(true)
-            val pad = (20 * resources.displayMetrics.density).toInt()
-            setPadding(pad, pad / 2, pad, 0)
-        }
-        MaterialAlertDialogBuilder(this)
-            .setTitle(if (previouslyPinned == null) R.string.trust_first_title else R.string.trust_changed_title)
-            .setView(tv)
-            .setCancelable(false)
-            .setPositiveButton(
-                if (previouslyPinned == null) R.string.trust_accept else R.string.trust_accept_changed
-            ) { _, _ ->
-                pins.put(hostPort, fingerprint)
-                connectSignaling()
-            }
-            .setNegativeButton(R.string.cancel) { _, _ -> end(getString(R.string.status_untrusted)) }
-            .show()
+        sb.trustCancel.setOnClickListener { sheet.dismiss() }
+        sheet.setOnDismissListener { if (!decided) end(getString(R.string.status_untrusted)) }
+        sheet.setContentView(sb.root)
+        sheet.behavior.state = BottomSheetBehavior.STATE_EXPANDED
+        sheet.behavior.skipCollapsed = true
+        sheet.show()
     }
 
     // ---------------- RtcSession events (WebRTC threads) ----------------
@@ -222,15 +213,15 @@ class CallActivity : AppCompatActivity(), SignalingClient.Listener, RtcSession.E
         when (state) {
             PeerConnection.PeerConnectionState.CONNECTED -> {
                 if (phase != Phase.IN_CALL) {
-                    setPhase(Phase.IN_CALL, null)
                     callStartedAt = SystemClock.elapsedRealtime()
+                    setPhase(Phase.IN_CALL, null)
                     tickTimer()
                 } else {
                     showStatus(null)
                 }
             }
             PeerConnection.PeerConnectionState.DISCONNECTED ->
-                showStatus(getString(R.string.status_reconnecting))
+                if (phase == Phase.IN_CALL) showStatus(getString(R.string.status_reconnecting))
             PeerConnection.PeerConnectionState.FAILED -> {
                 send("hangup")
                 end(getString(R.string.err_media_failed))
@@ -249,15 +240,61 @@ class CallActivity : AppCompatActivity(), SignalingClient.Listener, RtcSession.E
         if (!released) b.localView.setMirror(isFront)
     }
 
+    override fun onRelayProtocol(protocol: String) = runOnUiThread {
+        if (released) return@runOnUiThread
+        b.encPill.text = getString(R.string.e2e_encrypted_via, protocol.uppercase())
+        send("netinfo") { put("relay", protocol) }
+    }
+
     override fun onError(message: String) = runOnUiThread { showStatus(message) }
 
-    // ---------------- UI / lifecycle ----------------
+    // ---------------- UI ----------------
 
     private fun setPhase(p: Phase, status: String?) {
         phase = p
-        showStatus(status)
-        val inCall = p == Phase.IN_CALL
-        b.callTimer.visibility = if (inCall) View.VISIBLE else View.GONE
+        when (p) {
+            Phase.IN_CALL -> {
+                showStatus(null)
+                showInCallLayout(true)
+            }
+            Phase.ENDED -> {
+                b.callingControls.visibility = View.INVISIBLE
+                b.inCallControls.visibility = View.INVISIBLE
+                b.callingGroup.visibility = View.GONE
+                showStatus(status)
+            }
+            else -> {
+                showInCallLayout(false)
+                b.callingStatus.text = status.orEmpty()
+            }
+        }
+    }
+
+    private fun showInCallLayout(inCall: Boolean) {
+        val calling = if (inCall) View.GONE else View.VISIBLE
+        val connected = if (inCall) View.VISIBLE else View.GONE
+        b.scrim.visibility = calling
+        b.callingGroup.visibility = calling
+        b.callingControls.visibility = calling
+        b.inCallTop.visibility = connected
+        b.inCallControls.visibility = connected
+        b.localFrame.visibility = connected
+
+        val d = resources.displayMetrics.density
+        val lp = b.localView.layoutParams as FrameLayout.LayoutParams
+        if (inCall) {
+            lp.width = (108 * d).toInt()
+            lp.height = (152 * d).toInt()
+            lp.gravity = Gravity.TOP or Gravity.END
+            lp.topMargin = (48 * d).toInt()
+            lp.marginEnd = (16 * d).toInt()
+        } else {
+            lp.width = FrameLayout.LayoutParams.MATCH_PARENT
+            lp.height = FrameLayout.LayoutParams.MATCH_PARENT
+            lp.topMargin = 0
+            lp.marginEnd = 0
+        }
+        b.localView.layoutParams = lp
     }
 
     private fun showStatus(text: String?) {
@@ -265,10 +302,44 @@ class CallActivity : AppCompatActivity(), SignalingClient.Listener, RtcSession.E
         b.status.visibility = if (text.isNullOrEmpty()) View.GONE else View.VISIBLE
     }
 
+    private fun toggleMic() {
+        micOn = !micOn
+        rtc.setMicEnabled(micOn)
+        val icon = if (micOn) R.drawable.ic_mic else R.drawable.ic_mic_off
+        val desc = getString(if (micOn) R.string.mute else R.string.unmute)
+        b.btnMute.setImageResource(icon)
+        b.btnMuteCalling.setImageResource(icon)
+        b.btnMute.contentDescription = desc
+        b.btnMuteCalling.contentDescription = desc
+        styleToggle(b.btnMute, !micOn, R.drawable.bg_round_dark)
+        styleToggle(b.btnMuteCalling, !micOn, R.drawable.bg_round_glass)
+        val label = getString(if (micOn) R.string.mute else R.string.muted)
+        b.lblMute.text = label
+        b.lblMuteCalling.text = label
+    }
+
+    private fun toggleCamera() {
+        camOn = !camOn
+        rtc.setCameraEnabled(camOn)
+        b.btnCamera.setImageResource(if (camOn) R.drawable.ic_video else R.drawable.ic_video_off)
+        b.btnCamera.contentDescription = getString(if (camOn) R.string.camera_off else R.string.camera_on)
+        styleToggle(b.btnCamera, !camOn, R.drawable.bg_round_dark)
+        b.lblCamera.text = getString(if (camOn) R.string.camera else R.string.camera_is_off)
+    }
+
+    /** "Active" toggles (muted / camera off) are drawn light with a dark icon, as in the design. */
+    private fun styleToggle(v: ImageButton, active: Boolean, normalBg: Int) {
+        v.setBackgroundResource(if (active) R.drawable.bg_round_light else normalBg)
+        v.imageTintList = ColorStateList.valueOf(
+            ContextCompat.getColor(this, if (active) R.color.bg else R.color.fg)
+        )
+    }
+
     private fun tickTimer() {
         if (phase != Phase.IN_CALL) return
         val s = (SystemClock.elapsedRealtime() - callStartedAt) / 1000
-        b.callTimer.text = "%02d:%02d".format(s / 60, s % 60)
+        b.callTimer.text = if (s >= 3600) "%d:%02d:%02d".format(s / 3600, s % 3600 / 60, s % 60)
+        else "%02d:%02d".format(s / 60, s % 60)
         ui.postDelayed(::tickTimer, 1000)
     }
 
@@ -280,7 +351,6 @@ class CallActivity : AppCompatActivity(), SignalingClient.Listener, RtcSession.E
     private fun end(message: String) {
         if (phase == Phase.ENDED) return
         setPhase(Phase.ENDED, message)
-        b.controls.visibility = View.INVISIBLE
         release()
         ui.postDelayed({ if (!isFinishing) finish() }, 1800)
     }
@@ -328,9 +398,50 @@ class CallActivity : AppCompatActivity(), SignalingClient.Listener, RtcSession.E
                 .putExtra(EXTRA_PASSWORD, password)
                 .putExtra(EXTRA_NAME, name)
 
-        fun formatFingerprint(fp: String): String {
-            val parts = fp.split(':')
-            return parts.chunked(8).joinToString("\n") { it.joinToString(":") }
+        fun formatFingerprint(fp: String): String =
+            fp.split(':').chunked(8).joinToString("\n") { it.joinToString(":") }
+
+        /** Fills the certificate sheet; also used by the screenshot tests. */
+        fun bindTrustSheet(
+            ctx: Context,
+            sb: SheetTrustBinding,
+            hostPort: String,
+            fingerprint: String,
+            previouslyPinned: String?,
+        ) {
+            val changed = previouslyPinned != null
+            sb.trustTitle.setText(if (changed) R.string.trust_changed_title else R.string.trust_first_title)
+            sb.trustHost.text = if (changed) hostPort else ctx.getString(R.string.trust_first_host, hostPort)
+            sb.trustBody.setText(if (changed) R.string.trust_changed_body else R.string.trust_first_body)
+            sb.trustFpLabel.setText(if (changed) R.string.trust_new_label else R.string.trust_fp_label)
+            sb.trustAccept.setText(if (changed) R.string.trust_accept_changed else R.string.trust_accept)
+            sb.trustAccept.backgroundTintList = ColorStateList.valueOf(
+                ContextCompat.getColor(ctx, if (changed) R.color.danger_strong else R.color.accent)
+            )
+            if (changed) {
+                sb.trustIcon.setImageResource(R.drawable.ic_warning)
+                sb.trustIcon.setBackgroundResource(R.drawable.bg_tile_red)
+                sb.trustIcon.imageTintList = ColorStateList.valueOf(ContextCompat.getColor(ctx, R.color.danger_fg))
+                sb.trustOld.visibility = View.VISIBLE
+                sb.trustOld.text = ctx.getString(R.string.trust_old, formatFingerprint(previouslyPinned!!))
+            }
+            // 32 bytes -> 4 x 4 grid of "AA:BB" pairs
+            sb.trustGrid.removeAllViews()
+            fingerprint.split(':').chunked(2).forEach { pair ->
+                sb.trustGrid.addView(TextView(ctx).apply {
+                    text = pair.joinToString(":")
+                    typeface = Typeface.MONOSPACE
+                    textSize = 14f
+                    gravity = Gravity.CENTER
+                    setTextColor(ContextCompat.getColor(ctx, R.color.fg))
+                    val pad = (4 * ctx.resources.displayMetrics.density).toInt()
+                    setPadding(0, pad, 0, pad)
+                    layoutParams = GridLayout.LayoutParams(
+                        GridLayout.spec(GridLayout.UNDEFINED),
+                        GridLayout.spec(GridLayout.UNDEFINED, 1f),
+                    ).apply { width = 0 }
+                })
+            }
         }
     }
 }

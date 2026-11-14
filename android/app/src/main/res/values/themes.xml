@@ -1,25 +1,92 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources xmlns:tools="http://schemas.android.com/tools">
-    <style name="Theme.VideoCall" parent="Theme.Material3.DayNight.NoActionBar">
-        <item name="colorPrimary">#2F81F7</item>
+    <!-- Graphite Signal: one dark theme regardless of system setting -->
+    <style name="Theme.VideoCall" parent="Theme.Material3.Dark.NoActionBar">
+        <item name="colorPrimary">@color/accent</item>
+        <item name="colorOnPrimary">#FFFFFF</item>
+        <item name="colorSecondary">@color/accent_fg</item>
+        <item name="colorSurface">@color/sheet</item>
+        <item name="colorOnSurface">@color/fg</item>
+        <item name="colorSurfaceContainerHigh">@color/sheet</item>
+        <item name="colorError">@color/danger_fg</item>
+        <item name="android:colorBackground">@color/bg</item>
+        <item name="android:windowBackground">@color/bg</item>
+        <item name="android:statusBarColor">@color/bg</item>
+        <item name="android:navigationBarColor">@color/bg</item>
+        <item name="android:textColorPrimary">@color/fg</item>
+        <item name="android:textColorSecondary">@color/muted</item>
+        <item name="bottomSheetDialogTheme">@style/ThemeOverlay.VideoCall.BottomSheet</item>
     </style>
 
     <style name="Theme.VideoCall.Fullscreen">
-        <item name="android:windowBackground">@android:color/black</item>
+        <item name="android:windowBackground">@color/bg_call</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
         <item name="android:windowLayoutInDisplayCutoutMode" tools:targetApi="28">shortEdges</item>
     </style>
 
-    <style name="CallButton" parent="Widget.Material3.Button">
-        <item name="android:paddingStart">4dp</item>
-        <item name="android:paddingEnd">4dp</item>
-        <item name="android:textSize">14sp</item>
-        <item name="android:maxLines">1</item>
+    <style name="ThemeOverlay.VideoCall.BottomSheet" parent="ThemeOverlay.Material3.BottomSheetDialog">
+        <item name="bottomSheetStyle">@style/VideoCall.BottomSheet</item>
+        <item name="android:navigationBarColor">@color/sheet</item>
     </style>
 
-    <style name="CallButton.Tonal" parent="Widget.Material3.Button.TonalButton">
-        <item name="android:paddingStart">4dp</item>
-        <item name="android:paddingEnd">4dp</item>
-        <item name="android:textSize">14sp</item>
+    <style name="VideoCall.BottomSheet" parent="Widget.Material3.BottomSheet.Modal">
+        <item name="backgroundTint">@android:color/transparent</item>
+        <item name="android:background">@android:color/transparent</item>
+    </style>
+
+    <!-- text -->
+    <style name="Label">
+        <item name="android:textSize">13sp</item>
+        <item name="android:textColor">@color/muted</item>
+    </style>
+
+    <style name="Input">
+        <item name="android:background">@drawable/bg_input</item>
+        <item name="android:minHeight">50dp</item>
+        <item name="android:paddingStart">14dp</item>
+        <item name="android:paddingEnd">14dp</item>
+        <item name="android:textSize">16sp</item>
+        <item name="android:textColor">@color/fg</item>
+        <item name="android:textColorHint">#6B7380</item>
         <item name="android:maxLines">1</item>
+        <item name="android:layout_marginTop">6dp</item>
+    </style>
+
+    <style name="Pill">
+        <item name="android:background">@drawable/bg_glass_pill</item>
+        <item name="android:paddingStart">12dp</item>
+        <item name="android:paddingEnd">12dp</item>
+        <item name="android:paddingTop">6dp</item>
+        <item name="android:paddingBottom">6dp</item>
+        <item name="android:textColor">@color/fg</item>
+        <item name="android:textSize">14sp</item>
+        <item name="android:gravity">center_vertical</item>
+        <item name="android:drawablePadding">6dp</item>
+    </style>
+
+    <!-- round call buttons -->
+    <style name="RoundButton">
+        <item name="android:layout_width">56dp</item>
+        <item name="android:layout_height">56dp</item>
+        <item name="android:scaleType">center</item>
+        <item name="android:background">@drawable/bg_round_dark</item>
+        <item name="tint">@color/fg</item>
+    </style>
+
+    <style name="CtlLabel">
+        <item name="android:layout_width">wrap_content</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:layout_marginTop">6dp</item>
+        <item name="android:textSize">12sp</item>
+        <item name="android:textColor">@color/soft</item>
+    </style>
+
+    <style name="CtlColumn">
+        <item name="android:layout_width">0dp</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:layout_weight">1</item>
+        <item name="android:gravity">center_horizontal</item>
+        <item name="android:orientation">vertical</item>
     </style>
 </resources>

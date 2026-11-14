@@ -6,6 +6,7 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import android.security.keystore.KeyGenParameterSpec
+import android.text.InputType
 import android.security.keystore.KeyProperties
 import android.util.Base64
 import android.widget.Toast
@@ -49,21 +50,48 @@ class MainActivity : AppCompatActivity() {
                 runCatching { SecretBox.decrypt(enc) }.getOrNull()?.let { b.inputPassword.setText(it) }
             }
         }
-        b.versionText.text = getString(R.string.version_fmt, BuildConfig.VERSION_NAME)
+        b.versionText.text = getString(R.string.footer, BuildConfig.VERSION_NAME)
 
         b.btnCall.setOnClickListener { onCallClicked() }
-        b.btnClearPins.setOnClickListener {
+        b.rememberRow.setOnClickListener { b.checkRemember.toggle() }
+        b.btnShowPassword.setOnClickListener { togglePasswordVisibility() }
+        b.btnManagePins.setOnClickListener {
             val n = PinStore(this).count()
             MaterialAlertDialogBuilder(this)
                 .setTitle(R.string.clear_pins)
                 .setMessage(getString(R.string.clear_pins_confirm, n))
                 .setPositiveButton(R.string.ok) { _, _ ->
                     PinStore(this).clearAll()
+                    refreshPins()
                     Toast.makeText(this, R.string.pins_cleared, Toast.LENGTH_SHORT).show()
                 }
                 .setNegativeButton(R.string.cancel, null)
                 .show()
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        refreshPins()
+    }
+
+    private fun refreshPins() {
+        val n = PinStore(this).count()
+        b.pinsText.text = if (n == 0) getString(R.string.pins_none) else getString(R.string.pins_count, n)
+        b.btnManagePins.isEnabled = n > 0
+    }
+
+    private var passwordVisible = false
+
+    private fun togglePasswordVisibility() {
+        passwordVisible = !passwordVisible
+        val sel = b.inputPassword.selectionEnd
+        b.inputPassword.inputType = InputType.TYPE_CLASS_TEXT or
+            if (passwordVisible) InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD else InputType.TYPE_TEXT_VARIATION_PASSWORD
+        b.inputPassword.setSelection(sel.coerceAtLeast(0))
+        b.btnShowPassword.setImageResource(if (passwordVisible) R.drawable.ic_eye_off else R.drawable.ic_eye)
+        b.btnShowPassword.contentDescription =
+            getString(if (passwordVisible) R.string.hide_password else R.string.show_password)
     }
 
     private fun onCallClicked() {

@@ -9,17 +9,17 @@ import (
 	"time"
 )
 
-// demux splits one TCP listener into three by the first byte the client sends:
+// demux splits the call port's TCP listener by the first byte the client sends:
 //
-//	0x16        TLS handshake record (RFC 8446 §5.1)  -> HTTPS / WSS
+//	0x16        TLS handshake record (RFC 8446 §5.1)  -> WSS signaling
 //	0x00..0x01  STUN message (RFC 8489 §5); a TURN-over-TCP client always
 //	            starts with an Allocate request           -> TURN
-//	'A'..'Z'    plain HTTP request line                   -> HTTP (loopback only)
+//
+// Anything else is closed.
 type demux struct {
 	ln   net.Listener
 	tls  *chanListener
 	turn *chanListener
-	http *chanListener
 }
 
 func newDemux(ln net.Listener) *demux {
@@ -27,7 +27,6 @@ func newDemux(ln net.Listener) *demux {
 		ln:   ln,
 		tls:  newChanListener(ln.Addr()),
 		turn: newChanListener(ln.Addr()),
-		http: newChanListener(ln.Addr()),
 	}
 }
 
@@ -64,8 +63,6 @@ func (d *demux) classify(c net.Conn) {
 		d.tls.push(pc)
 	case first <= 0x01:
 		d.turn.push(pc)
-	case first >= 'A' && first <= 'Z':
-		d.http.push(pc)
 	default:
 		_ = c.Close()
 	}
@@ -74,7 +71,6 @@ func (d *demux) classify(c net.Conn) {
 func (d *demux) close() error {
 	d.tls.Close()
 	d.turn.Close()
-	d.http.Close()
 	return d.ln.Close()
 }
 

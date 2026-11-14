@@ -1,94 +1,307 @@
 <?xml version="1.0" encoding="utf-8"?>
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/root"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="#000000">
+    android:background="@color/bg_call">
 
     <org.webrtc.SurfaceViewRenderer
         android:id="@+id/remoteView"
         android:layout_width="match_parent"
-        android:layout_height="match_parent"
-        android:layout_gravity="center" />
+        android:layout_height="match_parent" />
 
+    <!-- Full screen while calling, picture-in-picture once connected. -->
     <org.webrtc.SurfaceViewRenderer
         android:id="@+id/localView"
-        android:layout_width="108dp"
-        android:layout_height="144dp"
-        android:layout_gravity="top|end"
-        android:layout_marginTop="32dp"
-        android:layout_marginEnd="16dp" />
+        android:layout_width="match_parent"
+        android:layout_height="match_parent" />
 
-    <TextView
-        android:id="@+id/callTimer"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_gravity="top|start"
-        android:layout_marginStart="16dp"
-        android:layout_marginTop="32dp"
-        android:background="#88000000"
-        android:paddingHorizontal="10dp"
-        android:paddingVertical="4dp"
-        android:textColor="#FFFFFF"
+    <View
+        android:id="@+id/localFrame"
+        android:layout_width="108dp"
+        android:layout_height="152dp"
+        android:layout_gravity="top|end"
+        android:layout_marginTop="48dp"
+        android:layout_marginEnd="16dp"
+        android:background="@drawable/bg_pip"
         android:visibility="gone" />
 
-    <TextView
-        android:id="@+id/status"
-        android:layout_width="wrap_content"
+    <View
+        android:id="@+id/scrim"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="@color/scrim" />
+
+    <!-- ===== calling ===== -->
+    <LinearLayout
+        android:id="@+id/callingGroup"
+        android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_gravity="center"
-        android:layout_marginHorizontal="32dp"
-        android:background="#AA000000"
-        android:gravity="center"
-        android:padding="16dp"
-        android:textColor="#FFFFFF"
-        android:textSize="16sp" />
+        android:layout_marginTop="112dp"
+        android:gravity="center_horizontal"
+        android:orientation="vertical">
+
+        <FrameLayout
+            android:layout_width="132dp"
+            android:layout_height="132dp"
+            android:background="@drawable/bg_ring_outer">
+
+            <FrameLayout
+                android:layout_width="108dp"
+                android:layout_height="108dp"
+                android:layout_gravity="center"
+                android:background="@drawable/bg_ring_inner">
+
+                <ImageView
+                    android:layout_width="84dp"
+                    android:layout_height="84dp"
+                    android:layout_gravity="center"
+                    android:background="@drawable/bg_avatar"
+                    android:importantForAccessibility="no"
+                    android:scaleType="center"
+                    android:src="@drawable/ic_monitor"
+                    app:tint="@color/avatar_fg" />
+            </FrameLayout>
+        </FrameLayout>
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="18dp"
+            android:text="@string/server"
+            android:textColor="@color/fg"
+            android:textSize="26sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/callingHost"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:fontFamily="monospace"
+            android:textColor="@color/muted"
+            android:textSize="14sp" />
+
+        <TextView
+            android:id="@+id/callingStatus"
+            style="@style/Pill"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="24dp"
+            android:layout_marginTop="18dp"
+            android:layout_marginEnd="24dp"
+            android:paddingStart="16dp"
+            android:paddingTop="8dp"
+            android:paddingEnd="16dp"
+            android:paddingBottom="8dp"
+            android:drawablePadding="8dp"
+            app:drawableStartCompat="@drawable/bg_dot_blue_small" />
+    </LinearLayout>
 
     <LinearLayout
-        android:id="@+id/controls"
+        android:id="@+id/callingControls"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_gravity="bottom"
+        android:layout_marginBottom="48dp"
+        android:baselineAligned="false"
         android:gravity="center"
         android:orientation="horizontal"
-        android:padding="16dp"
-        android:layout_marginBottom="16dp">
+        android:paddingStart="48dp"
+        android:paddingEnd="48dp">
 
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/btnMute"
-            style="@style/CallButton.Tonal"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_marginEnd="6dp"
-            android:layout_weight="1"
-            android:text="@string/mute" />
+        <LinearLayout style="@style/CtlColumn">
 
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/btnSwitch"
-            style="@style/CallButton.Tonal"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_marginHorizontal="6dp"
-            android:layout_weight="1"
-            android:text="@string/switch_camera" />
+            <ImageButton
+                android:id="@+id/btnMuteCalling"
+                style="@style/RoundButton"
+                android:background="@drawable/bg_round_glass"
+                android:contentDescription="@string/mute"
+                android:src="@drawable/ic_mic" />
 
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/btnCamera"
-            style="@style/CallButton.Tonal"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_marginHorizontal="6dp"
-            android:layout_weight="1"
-            android:text="@string/camera_off" />
+            <TextView
+                android:id="@+id/lblMuteCalling"
+                style="@style/CtlLabel"
+                android:text="@string/mute" />
+        </LinearLayout>
 
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/btnHangup"
-            style="@style/CallButton"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_marginStart="6dp"
-            android:layout_weight="1"
-            android:backgroundTint="#DA3633"
-            android:text="@string/hangup"
-            android:textColor="#FFFFFF" />
+        <LinearLayout style="@style/CtlColumn">
+
+            <ImageButton
+                android:id="@+id/btnCancel"
+                style="@style/RoundButton"
+                android:layout_width="72dp"
+                android:layout_height="72dp"
+                android:background="@drawable/bg_round_red"
+                android:contentDescription="@string/cancel_call"
+                android:src="@drawable/ic_call_end"
+                app:tint="#FFFFFF" />
+
+            <TextView
+                style="@style/CtlLabel"
+                android:text="@string/cancel" />
+        </LinearLayout>
+
+        <LinearLayout style="@style/CtlColumn">
+
+            <ImageButton
+                android:id="@+id/btnFlipCalling"
+                style="@style/RoundButton"
+                android:background="@drawable/bg_round_glass"
+                android:contentDescription="@string/switch_camera"
+                android:src="@drawable/ic_flip" />
+
+            <TextView
+                style="@style/CtlLabel"
+                android:text="@string/switch_camera_short" />
+        </LinearLayout>
     </LinearLayout>
+
+    <!-- ===== in call ===== -->
+    <LinearLayout
+        android:id="@+id/inCallTop"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="16dp"
+        android:layout_marginTop="48dp"
+        android:orientation="vertical"
+        android:visibility="gone">
+
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:background="@drawable/bg_glass_pill"
+            android:orientation="horizontal"
+            android:paddingStart="12dp"
+            android:paddingTop="6dp"
+            android:paddingEnd="12dp"
+            android:paddingBottom="6dp">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/server"
+                android:textColor="@color/fg"
+                android:textSize="14sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/callTimer"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:fontFamily="monospace"
+                android:text="00:00"
+                android:textColor="@color/muted"
+                android:textSize="14sp" />
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/encPill"
+            style="@style/Pill"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:paddingStart="10dp"
+            android:paddingTop="5dp"
+            android:paddingEnd="10dp"
+            android:paddingBottom="5dp"
+            android:text="@string/e2e_encrypted"
+            android:textColor="@color/ok"
+            android:textSize="12sp"
+            app:drawableStartCompat="@drawable/ic_lock_small"
+            app:drawableTint="@color/ok" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:id="@+id/inCallControls"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom"
+        android:layout_marginStart="12dp"
+        android:layout_marginEnd="12dp"
+        android:layout_marginBottom="28dp"
+        android:background="@drawable/bg_controls_bar"
+        android:baselineAligned="false"
+        android:orientation="horizontal"
+        android:paddingStart="8dp"
+        android:paddingTop="14dp"
+        android:paddingEnd="8dp"
+        android:paddingBottom="12dp"
+        android:visibility="gone">
+
+        <LinearLayout style="@style/CtlColumn">
+
+            <ImageButton
+                android:id="@+id/btnMute"
+                style="@style/RoundButton"
+                android:contentDescription="@string/mute"
+                android:src="@drawable/ic_mic" />
+
+            <TextView
+                android:id="@+id/lblMute"
+                style="@style/CtlLabel"
+                android:text="@string/mute" />
+        </LinearLayout>
+
+        <LinearLayout style="@style/CtlColumn">
+
+            <ImageButton
+                android:id="@+id/btnSwitch"
+                style="@style/RoundButton"
+                android:contentDescription="@string/switch_camera"
+                android:src="@drawable/ic_flip" />
+
+            <TextView
+                style="@style/CtlLabel"
+                android:text="@string/switch_camera_short" />
+        </LinearLayout>
+
+        <LinearLayout style="@style/CtlColumn">
+
+            <ImageButton
+                android:id="@+id/btnCamera"
+                style="@style/RoundButton"
+                android:contentDescription="@string/camera_off"
+                android:src="@drawable/ic_video" />
+
+            <TextView
+                android:id="@+id/lblCamera"
+                style="@style/CtlLabel"
+                android:text="@string/camera" />
+        </LinearLayout>
+
+        <LinearLayout style="@style/CtlColumn">
+
+            <ImageButton
+                android:id="@+id/btnHangup"
+                style="@style/RoundButton"
+                android:background="@drawable/bg_round_red"
+                android:contentDescription="@string/hangup"
+                android:src="@drawable/ic_call_end"
+                app:tint="#FFFFFF" />
+
+            <TextView
+                style="@style/CtlLabel"
+                android:text="@string/hangup" />
+        </LinearLayout>
+    </LinearLayout>
+
+    <!-- transient messages: reconnecting, call ended, errors -->
+    <TextView
+        android:id="@+id/status"
+        style="@style/Pill"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center"
+        android:layout_marginStart="32dp"
+        android:layout_marginEnd="32dp"
+        android:gravity="center"
+        android:paddingStart="18dp"
+        android:paddingTop="10dp"
+        android:paddingEnd="18dp"
+        android:paddingBottom="10dp"
+        android:textSize="15sp"
+        android:visibility="gone" />
 </FrameLayout>

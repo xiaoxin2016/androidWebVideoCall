@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Graphite Signal -->
+    <color name="bg">#0B0D10</color>
+    <color name="bg_call">#050608</color>
+    <color name="panel">#13161B</color>
+    <color name="panel2">#1A1E24</color>
+    <color name="sheet">#161A20</color>
+    <color name="well">#0F1216</color>
+    <color name="line">#22272E</color>
+    <color name="line2">#272C34</color>
+    <color name="fg">#ECEEF1</color>
+    <color name="muted">#A3AAB5</color>
+    <color name="soft">#C9CED6</color>
+    <color name="accent">#2563EB</color>
+    <color name="accent_fg">#6EA8FF</color>
+    <color name="accept">#15803D</color>
+    <color name="danger">#DC2626</color>
+    <color name="danger_strong">#B91C1C</color>
+    <color name="danger_fg">#FF8A80</color>
+    <color name="ok">#34D399</color>
+    <color name="ctl_dark">#262C35</color>
+    <color name="glass">#B80C0E12</color>
+    <color name="scrim">#9E06080B</color>
+    <color name="avatar_bg">#1E3A6E</color>
+    <color name="avatar_fg">#CFE0FF</color>
+</resources>

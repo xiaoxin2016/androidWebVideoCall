@@ -1,8 +1,6 @@
 package main
 
 import (
-	"crypto/sha256"
-	"crypto/subtle"
 	"encoding/json"
 	"log"
 	"net"
@@ -39,29 +37,53 @@ const (
 
 // Hub tracks at most one web client and one Android client and the call
 // state between them. All signaling is relayed only between those two.
+// The role is fixed by the listener a socket arrived on: the console port
+// yields "web", the public call port yields "android".
 type Hub struct {
-	passwordHash [32]byte
-	hasPassword  bool
-	turnSecret   string
-	fingerprint  string
-	udpEnabled   bool
-	limiter      *authLimiter
+	turnSecret string
+	callPort   int
+	udpEnabled bool
+	persist    func(hash string) error
+	limiter    *authLimiter
+
+	pwMu         sync.RWMutex
+	passwordHash string
 
 	mu      sync.Mutex
 	clients map[string]*client
 	state   callState
 }
 
-func newHub(password, turnSecret, fp string, udp bool) *Hub {
+type hubOptions struct {
+	passwordHash string
+	persist      func(hash string) error
+	turnSecret   string
+	callPort     int
+	udp          bool
+}
+
+func newHub(o hubOptions) *Hub {
 	return &Hub{
-		passwordHash: sha256.Sum256([]byte(password)),
-		hasPassword:  password != "",
-		turnSecret:   turnSecret,
-		fingerprint:  fp,
-		udpEnabled:   udp,
+		passwordHash: o.passwordHash,
+		persist:      o.persist,
+		turnSecret:   o.turnSecret,
+		callPort:     o.callPort,
+		udpEnabled:   o.udp,
 		limiter:      newAuthLimiter(),
 		clients:      map[string]*client{},
 	}
+}
+
+func (h *Hub) passwordSet() bool {
+	h.pwMu.RLock()
+	defer h.pwMu.RUnlock()
+	return h.passwordHash != ""
+}
+
+func (h *Hub) currentHash() string {
+	h.pwMu.RLock()
+	defer h.pwMu.RUnlock()
+	return h.passwordHash
 }
 
 type message struct {
@@ -72,6 +94,7 @@ type message struct {
 	Reason    string          `json:"reason,omitempty"`
 	SDP       string          `json:"sdp,omitempty"`
 	Candidate json.RawMessage `json:"candidate,omitempty"`
+	Relay     string          `json:"relay,omitempty"` // netinfo: "udp" | "tcp"
 }
 
 type iceServer struct {
@@ -81,15 +104,16 @@ type iceServer struct {
 }
 
 type client struct {
-	hub     *Hub
-	conn    *websocket.Conn
-	send    chan []byte
-	role    string
-	name    string
-	ip      string
-	host    string // Host header the client used, for building TURN URLs
-	closeMu sync.Once
-	done    chan struct{}
+	hub      *Hub
+	conn     *websocket.Conn
+	send     chan []byte
+	role     string // set after successful auth
+	listener string // role allowed by the listener the socket arrived on
+	name     string
+	ip       string
+	host     string // Host header the client used, for building TURN URLs
+	closeMu  sync.Once
+	done     chan struct{}
 }
 
 var upgrader = websocket.Upgrader{
@@ -99,23 +123,26 @@ var upgrader = websocket.Upgrader{
 	// sends no Origin header and is accepted.
 }
 
-func (h *Hub) serveWS(w http.ResponseWriter, r *http.Request) {
-	conn, err := upgrader.Upgrade(w, r, nil)
-	if err != nil {
-		return
+func (h *Hub) serveWS(role string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		ip, _, _ := net.SplitHostPort(r.RemoteAddr)
+		c := &client{
+			hub:      h,
+			conn:     conn,
+			send:     make(chan []byte, 64),
+			listener: role,
+			ip:       ip,
+			host:     r.Host,
+			done:     make(chan struct{}),
+		}
+		conn.SetReadLimit(maxMsgSize)
+		go c.writePump()
+		c.readPump()
 	}
-	ip, _, _ := net.SplitHostPort(r.RemoteAddr)
-	c := &client{
-		hub:  h,
-		conn: conn,
-		send: make(chan []byte, 64),
-		ip:   ip,
-		host: r.Host,
-		done: make(chan struct{}),
-	}
-	conn.SetReadLimit(maxMsgSize)
-	go c.writePump()
-	c.readPump()
 }
 
 func (c *client) readPump() {
@@ -199,26 +226,25 @@ func (c *client) close() {
 }
 
 func (h *Hub) authenticate(c *client, m *message) bool {
-	if m.Role != roleWeb && m.Role != roleAndroid {
+	if m.Role != c.listener {
 		c.sendJSON(map[string]string{"type": "auth_fail", "reason": "bad_role"})
 		return false
 	}
-	if wait := h.limiter.blocked(c.ip); wait > 0 {
-		c.sendJSON(map[string]string{"type": "auth_fail", "reason": "rate_limited",
-			"retry_after": strconv.Itoa(int(wait.Seconds()) + 1)})
-		return false
-	}
-	if h.hasPassword {
-		got := sha256.Sum256([]byte(m.Password))
-		if subtle.ConstantTimeCompare(got[:], h.passwordHash[:]) != 1 {
+	if c.listener == roleAndroid {
+		if wait := h.limiter.blocked(c.ip); wait > 0 {
+			c.sendJSON(map[string]string{"type": "auth_fail", "reason": "rate_limited",
+				"retry_after": strconv.Itoa(int(wait.Seconds()) + 1)})
+			return false
+		}
+		if hash := h.currentHash(); hash != "" && !verifyPassword(hash, m.Password) {
 			h.limiter.fail(c.ip)
-			log.Printf("认证失败: role=%s ip=%s", m.Role, c.ip)
+			log.Printf("认证失败: ip=%s", c.ip)
 			time.Sleep(500 * time.Millisecond)
 			c.sendJSON(map[string]string{"type": "auth_fail", "reason": "bad_password"})
 			return false
 		}
+		h.limiter.success(c.ip)
 	}
-	h.limiter.success(c.ip)
 
 	name := m.Name
 	if !utf8.ValidString(name) {
@@ -254,9 +280,9 @@ func (h *Hub) authenticate(c *client, m *message) bool {
 	}
 	resp := map[string]any{
 		"type":        "auth_ok",
-		"iceServers":  []iceServer{{URLs: h.turnURLs(c.host), Username: user, Credential: cred}},
-		"fingerprint": h.fingerprint,
+		"iceServers":  []iceServer{{URLs: h.turnURLs(c), Username: user, Credential: cred}},
 		"peerOnline":  peer != nil,
+		"passwordSet": h.passwordSet(),
 		"version":     version,
 	}
 	if peer != nil {
@@ -270,18 +296,28 @@ func (h *Hub) authenticate(c *client, m *message) bool {
 	return true
 }
 
-// turnURLs builds TURN URLs from the host:port the client itself used to
-// reach us, so port forwarding / DNS names work without configuration.
-func (h *Hub) turnURLs(hostHeader string) []string {
-	host, port, err := net.SplitHostPort(hostHeader)
+// turnURLs builds TURN URLs from the address the client itself used to reach
+// us, so port forwarding and DNS names work without configuration:
+//   - Android: the host:port it dialed on the call port;
+//   - web: the host it opened the console with, plus the call port
+//     (normally localhost, so media stays on loopback).
+func (h *Hub) turnURLs(c *client) []string {
+	host, port, err := net.SplitHostPort(c.host)
 	if err != nil {
-		host, port = hostHeader, "443"
+		host, port = c.host, "443"
 	}
+	if c.listener == roleWeb {
+		port = strconv.Itoa(h.callPort)
+	}
+	return buildTurnURLs(host, port, h.udpEnabled)
+}
+
+func buildTurnURLs(host, port string, udp bool) []string {
 	if ip := net.ParseIP(host); ip != nil && ip.To4() == nil {
 		host = "[" + host + "]"
 	}
 	urls := []string{}
-	if h.udpEnabled {
+	if udp {
 		urls = append(urls, "turn:"+host+":"+port+"?transport=udp")
 	}
 	return append(urls, "turn:"+host+":"+port+"?transport=tcp")
@@ -295,6 +331,14 @@ func (h *Hub) peerOf(c *client) *client {
 }
 
 func (h *Hub) handle(c *client, m *message) {
+	switch m.Type {
+	case "set_password", "clear_password":
+		if c.role == roleWeb {
+			h.changePassword(c, m)
+		}
+		return
+	}
+
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if h.clients[c.role] != c {
@@ -316,7 +360,7 @@ func (h *Hub) handle(c *client, m *message) {
 			return
 		}
 		h.state = stateRinging
-		peer.sendJSON(map[string]string{"type": "incoming", "name": c.name})
+		peer.sendJSON(map[string]any{"type": "incoming", "name": c.name, "ip": c.ip, "verified": h.passwordSet()})
 		log.Printf("来电: %s", c.name)
 
 	case "accept":
@@ -347,7 +391,7 @@ func (h *Hub) handle(c *client, m *message) {
 		}
 		log.Printf("通话结束 (%s 挂断)", c.role)
 
-	case "offer", "answer", "candidate":
+	case "offer", "answer", "candidate", "netinfo":
 		if h.state != stateInCall || peer == nil {
 			return
 		}
@@ -355,8 +399,44 @@ func (h *Hub) handle(c *client, m *message) {
 		if (m.Type == "offer" && c.role != roleAndroid) || (m.Type == "answer" && c.role != roleWeb) {
 			return
 		}
-		peer.sendJSON(message{Type: m.Type, SDP: m.SDP, Candidate: m.Candidate})
+		if m.Type == "netinfo" && m.Relay != "udp" && m.Relay != "tcp" {
+			return
+		}
+		peer.sendJSON(message{Type: m.Type, SDP: m.SDP, Candidate: m.Candidate, Relay: m.Relay})
 	}
+}
+
+// changePassword updates the Android access password from the console.
+// New connections use it immediately; an established session is unaffected.
+func (h *Hub) changePassword(c *client, m *message) {
+	hash := ""
+	if m.Type == "set_password" {
+		if err := validatePassword(m.Password); err != nil {
+			c.sendJSON(map[string]any{"type": "password_status", "set": h.passwordSet(), "error": err.Error()})
+			return
+		}
+		var err error
+		if hash, err = hashPassword(m.Password); err != nil {
+			c.sendJSON(map[string]any{"type": "password_status", "set": h.passwordSet(), "error": "internal error"})
+			return
+		}
+	}
+	if h.persist != nil {
+		if err := h.persist(hash); err != nil {
+			log.Printf("保存配置失败: %v", err)
+			c.sendJSON(map[string]any{"type": "password_status", "set": h.passwordSet(), "error": "保存配置失败: " + err.Error()})
+			return
+		}
+	}
+	h.pwMu.Lock()
+	h.passwordHash = hash
+	h.pwMu.Unlock()
+	if hash == "" {
+		log.Printf("接入密码已清除")
+	} else {
+		log.Printf("接入密码已更新")
+	}
+	c.sendJSON(map[string]any{"type": "password_status", "set": hash != "", "changed": true})
 }
 
 func (h *Hub) unregister(c *client) {

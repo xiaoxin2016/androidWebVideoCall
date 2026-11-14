@@ -45,6 +45,7 @@ class RtcSession(
         fun onConnectionState(state: PeerConnection.PeerConnectionState)
         fun onRemoteVideo(track: VideoTrack)
         fun onCameraSwitched(isFront: Boolean)
+        fun onRelayProtocol(protocol: String)
         fun onError(message: String)
     }
 
@@ -231,6 +232,21 @@ class RtcSession(
         executor.shutdown()
     }
 
+    /** Which transport ("udp"/"tcp") our TURN allocation uses for the selected pair. */
+    private fun reportRelayProtocol() {
+        executor.execute {
+            val conn = pc ?: return@execute
+            conn.getStats { report ->
+                val stats = report.statsMap
+                val pairId = stats.values.firstOrNull { it.type == "transport" }
+                    ?.members?.get("selectedCandidatePairId") as? String ?: return@getStats
+                val localId = stats[pairId]?.members?.get("localCandidateId") as? String ?: return@getStats
+                val proto = stats[localId]?.members?.get("relayProtocol") as? String ?: return@getStats
+                events.onRelayProtocol(proto.lowercase())
+            }
+        }
+    }
+
     private val pcObserver = object : PeerConnection.Observer {
         override fun onIceCandidate(c: IceCandidate) {
             events.onLocalCandidate(JSONObject().apply {
@@ -240,8 +256,10 @@ class RtcSession(
             })
         }
 
-        override fun onConnectionChange(newState: PeerConnection.PeerConnectionState) =
+        override fun onConnectionChange(newState: PeerConnection.PeerConnectionState) {
             events.onConnectionState(newState)
+            if (newState == PeerConnection.PeerConnectionState.CONNECTED) reportRelayProtocol()
+        }
 
         override fun onTrack(transceiver: RtpTransceiver) {
             val track = transceiver.receiver.track()
